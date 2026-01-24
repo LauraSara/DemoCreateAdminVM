@@ -1,21 +1,159 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
-
 trigger:
-- main
+  - main
 
-jobs:
-- deployment: CI_VM
-  displayName: 'CI sobre VM Linux'
-  environment: Admin-VM
-  strategy:
-    runOnce:
-      deploy:
-        steps:
-        - script: |
-            echo "Pipeline ejecutándose correctamente en la VM"
-            hostname
-            whoami
-          displayName: 'Validación de ejecución en VM'
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:
+  azureSubscription: "DEVOPS_001A_GRUPO03_SC"
+  location: "eastus2"
+  resourceGroupName: "DEVOPS_001A_GRUPO03"
+  virtualNetworkName: "VNet-DEVOPS-001A-GRUPO03"
+  subnetName: "Subnet-DEVOPS-001A-GRUPO03"
+  addressPrefix: "10.0.0.0/16"
+  subnetPrefix: "10.0.1.0/24"
+  securityGroupName: "NSG-DEVOPS-001A-GRUPO03"
+  publicIpName: "PublicIP-DEVOPS-001A-GRUPO03"
+  vmName: "VM-LINUX-1"
+  vmSize: "Standard_B1s"
+  adminUsername: "azureuser"
+
+  imagePublisher: "Canonical"
+  imageOffer: "0001-com-ubuntu-server-jammy"
+  imageSku: "22_04-lts-gen2"
+  imageVersion: "latest"
+
+steps:
+  - task: AzureCLI@2
+    displayName: "Provisionar infraestructura + Deploy Apache (IaC CI/CD)"
+    inputs:
+      azureSubscription: $(azureSubscription)
+      scriptType: "bash"
+      scriptLocation: "inlineScript"
+      inlineScript: |
+        set -e
+
+        echo "==============================="
+        echo "1) Creando grupo de recursos..."
+        echo "==============================="
+        az group create --name $(resourceGroupName) --location "$(location)" \
+          --tags Proyecto=DevOps Experiencia=1 Grupo=3
+
+        echo "==============================="
+        echo "2) Creando VNet + Subnet..."
+        echo "==============================="
+        az network vnet create \
+          --resource-group $(resourceGroupName) \
+          --name $(virtualNetworkName) \
+          --address-prefix $(addressPrefix) \
+          --subnet-name $(subnetName) \
+          --subnet-prefix $(subnetPrefix)
+
+        az network vnet wait --resource-group $(resourceGroupName) --name $(virtualNetworkName) --created
+
+        echo "==============================="
+        echo "3) Creando NSG..."
+        echo "==============================="
+        az network nsg create --resource-group $(resourceGroupName) --name $(securityGroupName)
+        az network nsg wait --resource-group $(resourceGroupName) --name $(securityGroupName) --created
+
+        echo "==============================="
+        echo "4) Reglas NSG: SSH 22 / HTTP 80 / ICMP..."
+        echo "==============================="
+        az network nsg rule create \
+          --resource-group $(resourceGroupName) \
+          --nsg-name $(securityGroupName) \
+          --name AllowSSH \
+          --protocol tcp \
+          --direction inbound \
+          --priority 1000 \
+          --source-address-prefix '*' \
+          --source-port-range '*' \
+          --destination-address-prefix '*' \
+          --destination-port-range 22 \
+          --access allow
+
+        az network nsg rule create \
+          --resource-group $(resourceGroupName) \
+          --nsg-name $(securityGroupName) \
+          --name AllowHTTP \
+          --protocol tcp \
+          --direction inbound \
+          --priority 1001 \
+          --source-address-prefix '*' \
+          --source-port-range '*' \
+          --destination-address-prefix '*' \
+          --destination-port-range 80 \
+          --access allow
+
+        az network nsg rule create \
+          --resource-group $(resourceGroupName) \
+          --nsg-name $(securityGroupName) \
+          --name AllowICMP \
+          --protocol icmp \
+          --direction inbound \
+          --priority 1002 \
+          --source-address-prefix '*' \
+          --source-port-range '*' \
+          --destination-address-prefix '*' \
+          --destination-port-range '*' \
+          --access allow
+
+        echo "==============================="
+        echo "5) Creando IP pública..."
+        echo "==============================="
+        az network public-ip create \
+          --resource-group $(resourceGroupName) \
+          --name $(publicIpName) \
+          --sku Standard \
+          --allocation-method Static
+
+        az network public-ip wait --resource-group $(resourceGroupName) --name $(publicIpName) --created
+
+        echo "==============================="
+        echo "6) Creando VM Ubuntu..."
+        echo "==============================="
+        az vm create \
+          --resource-group $(resourceGroupName) \
+          --name $(vmName) \
+          --image $(imagePublisher):$(imageOffer):$(imageSku):$(imageVersion) \
+          --size $(vmSize) \
+          --admin-username $(adminUsername) \
+          --authentication-type ssh \
+          --ssh-key-values "$(sshPublicKey)" \
+
+          --vnet-name $(virtualNetworkName) \
+          --subnet $(subnetName) \
+          --nsg $(securityGroupName) \
+          --public-ip-address $(publicIpName) \
+          --tags Proyecto=DevOps Grupo=3 Semana=3
+
+        az vm wait --resource-group $(resourceGroupName) --name $(vmName) --created
+
+        echo "==============================="
+        echo "7) Instalando Apache + creando index.html..."
+        echo "==============================="
+        az vm run-command invoke \
+          --resource-group $(resourceGroupName) \
+          --name $(vmName) \
+          --command-id RunShellScript \
+          --scripts "sudo apt update && sudo apt install -y apache2"
+
+        az vm run-command invoke \
+          --resource-group $(resourceGroupName) \
+          --name $(vmName) \
+          --command-id RunShellScript \
+          --scripts "echo 'Hola curso DevOps 👋 - Grupo 3: CI/CD + IaC desde Azure DevOps (Semana 3)' | sudo tee /var/www/html/index.html"
+
+        echo "==============================="
+        echo "8) Mostrando IP pública + prueba HTTP (curl)..."
+        echo "==============================="
+        PUBLIC_IP=$(az network public-ip show --resource-group $(resourceGroupName) --name $(publicIpName) --query ipAddress -o tsv)
+        echo "IP Pública de la VM: $PUBLIC_IP"
+        echo "URL para validar en navegador: http://$PUBLIC_IP"
+        echo "Probando HTTP con curl..."
+        curl -I http://$PUBLIC_IP || true
+
+        echo "==============================="
+        echo "Pipeline finalizado OK"
+        echo "==============================="
