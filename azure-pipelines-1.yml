@@ -3,24 +3,26 @@ trigger:
  
 stages:
 # =========================
-# CI - BUILD
+# CI - BUILD (Self-hosted)
 # =========================
 - stage: Build
-  displayName: "CI - Build Grupo 3"
+  displayName: "CI - Build Grupo 3 (Self-hosted)"
   jobs:
   - job: BuildJob
-    displayName: "Build artifact"
+    displayName: "Build artifact en VM"
     pool:
-      vmImage: "ubuntu-latest"
+      name: "Default"  
     steps:
       - checkout: self
  
       - script: |
+          rm -rf dist
           mkdir -p dist
           echo "<h1>✅ Deploy OK - DevOps Grupo 3</h1>" > dist/index.html
-          echo "<p>VM: vm-linux-1 | RG: DEVOPS_001A_GRUPO03</p>" >> dist/index.html
-          echo "<p>Deploy automático desde Azure DevOps Environments</p>" >> dist/index.html
-        displayName: "Generar index.html"
+          echo "<p>Environment: env-grupo03-vm</p>" >> dist/index.html
+          echo "<p>VM: vm-linux-1</p>" >> dist/index.html
+          echo "<p>CD usando Azure Pipelines Environments (sin ARM Service Connection)</p>" >> dist/index.html
+        displayName: "Generar artefacto"
  
       - task: PublishPipelineArtifact@1
         inputs:
@@ -30,14 +32,14 @@ stages:
  
  
 # =========================
-# CD - DEPLOY
+# CD - DEPLOY (Environment)
 # =========================
 - stage: Deploy
   displayName: "CD - Deploy a VM (Environment)"
   dependsOn: Build
   jobs:
   - deployment: DeployToVM
-    displayName: "Deploy Grupo 3 a vm-linux-1"
+    displayName: "Deploy a vm-linux-1"
     environment:
       name: "env-grupo03-vm"
       resourceType: VirtualMachine
@@ -54,7 +56,7 @@ stages:
                 sudo apt install -y apache2
                 sudo systemctl enable apache2
                 sudo systemctl start apache2
-              displayName: "Instalar/Levantar Apache"
+              displayName: "Instalar y levantar Apache"
  
             - script: |
                 sudo rm -rf /var/www/html/*
@@ -63,6 +65,6 @@ stages:
               displayName: "Deploy a /var/www/html"
  
             - script: |
-                echo "✅ Deploy completado en VM vm-linux-1"
+                echo "✅ Deploy completado"
                 curl -I http://localhost || true
-              displayName: "Verificación (localhost)"
+              displayName: "Verificación"
