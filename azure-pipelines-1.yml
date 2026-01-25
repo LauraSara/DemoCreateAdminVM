@@ -1,0 +1,68 @@
+trigger:
+- main
+ 
+stages:
+# =========================
+# CI - BUILD
+# =========================
+- stage: Build
+  displayName: "CI - Build Grupo 3"
+  jobs:
+  - job: BuildJob
+    displayName: "Build artifact"
+    pool:
+      vmImage: "ubuntu-latest"
+    steps:
+      - checkout: self
+ 
+      - script: |
+          mkdir -p dist
+          echo "<h1>✅ Deploy OK - DevOps Grupo 3</h1>" > dist/index.html
+          echo "<p>VM: vm-linux-1 | RG: DEVOPS_001A_GRUPO03</p>" >> dist/index.html
+          echo "<p>Deploy automático desde Azure DevOps Environments</p>" >> dist/index.html
+        displayName: "Generar index.html"
+ 
+      - task: PublishPipelineArtifact@1
+        inputs:
+          targetPath: "dist"
+          artifact: "drop"
+        displayName: "Publicar artefacto"
+ 
+ 
+# =========================
+# CD - DEPLOY
+# =========================
+- stage: Deploy
+  displayName: "CD - Deploy a VM (Environment)"
+  dependsOn: Build
+  jobs:
+  - deployment: DeployToVM
+    displayName: "Deploy Grupo 3 a vm-linux-1"
+    environment:
+      name: "env-grupo03-vm"
+      resourceType: VirtualMachine
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - download: current
+              artifact: drop
+              displayName: "Descargar artefacto"
+ 
+            - script: |
+                sudo apt update
+                sudo apt install -y apache2
+                sudo systemctl enable apache2
+                sudo systemctl start apache2
+              displayName: "Instalar/Levantar Apache"
+ 
+            - script: |
+                sudo rm -rf /var/www/html/*
+                sudo cp -r $(Pipeline.Workspace)/drop/* /var/www/html/
+                sudo chmod -R 755 /var/www/html
+              displayName: "Deploy a /var/www/html"
+ 
+            - script: |
+                echo "✅ Deploy completado en VM vm-linux-1"
+                curl -I http://localhost || true
+              displayName: "Verificación (localhost)"
